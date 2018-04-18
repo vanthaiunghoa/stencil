@@ -32,6 +32,7 @@
     "set.version": "node scripts/set-version.js",
     "start": "npm install && npm run build",
     "test": "npm run test.jest",
+    "test.debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
     "test.dist": "node scripts/test-dist.js",
     "test.jest": "jest",
     "test.karma": "cd test/karma && npm run karma.prod",
@@ -58,7 +59,7 @@
     "@types/chalk": "^0.4.31",
     "@types/chokidar": "^1.7.4",
     "@types/fs-extra": "^5.0.0",
-    "@types/jest": "22.0.1",
+    "@types/jest": "22.2.3",
     "@types/jsdom": "^11.0.4",
     "@types/node": "7.0.5",
     "autoprefixer": "^8.2.0",
@@ -80,7 +81,7 @@
     "postcss": "^6.0.21",
     "semver": "^5.5.0",
     "source-map": "^0.7.0",
-    "ts-jest": "^22.0.1",
+    "ts-jest": "^22.4.3",
     "tslint": "^5.9.1",
     "tslint-ionic-rules": "0.0.13",
     "webpack": "^3.10.0"
@@ -103,6 +104,12 @@
     "progressive web app"
   ],
   "jest": {
+    "globals": {
+      "ts-jest": {
+        "skipBabel": true,
+        "tsConfigFile": "src/tsconfig-test.json"
+      }
+    },
     "testEnvironment": "node",
     "setupTestFrameworkScriptFile": "<rootDir>/scripts/setupTests.js",
     "moduleFileExtensions": [
@@ -111,7 +118,7 @@
       "js"
     ],
     "transform": {
-      "^.+\\.(ts|tsx)$": "<rootDir>/scripts/jest.preprocessor.js"
+      "^.+\\.(ts|tsx)$": "ts-jest"
     },
     "testRegex": "/src/.*\\.spec\\.(ts|tsx|js)$",
     "testPathIgnorePatterns": [
