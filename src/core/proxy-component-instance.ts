@@ -27,12 +27,11 @@ export function proxyComponentInstance(
 
   // get the properties from the constructor
   // and add default "mode" and "color" properties
-  properties = Object.assign({
-    color: { type: String }
-  }, cmpConstructor.properties);
-
-  // always set mode
-  properties.mode = { type: String };
+  properties = {
+    color: { type: String },
+    mode: { type: String },
+    ...cmpConstructor.properties
+  };
 
   // define each of the members and initialize what their role is
   for (memberName in properties) {

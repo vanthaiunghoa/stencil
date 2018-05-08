@@ -137,14 +137,10 @@ export function defineMember(
 }
 
 
-export function setValue(plt: d.PlatformApi, elm: d.HostElement, memberName: string, newVal: any, values?: any, instance?: d.ComponentInstance, watchMethods?: string[]) {
+export function setValue(plt: d.PlatformApi, elm: d.HostElement, memberName: string, newVal: any, instance?: d.ComponentInstance, watchMethods?: string[]) {
   // get the internal values object, which should always come from the host element instance
   // create the _values object if it doesn't already exist
-  values = plt.valuesMap.get(elm);
-  if (!values) {
-    plt.valuesMap.set(elm, values = {});
-  }
-
+  const values = plt.valuesMap.get(elm);
   const oldVal = values[memberName];
 
   // check our new property value against our internal value
@@ -159,16 +155,17 @@ export function setValue(plt: d.PlatformApi, elm: d.HostElement, memberName: str
 
     if (instance) {
       // get an array of method names of watch functions to call
-      watchMethods = values[WATCH_CB_PREFIX + memberName];
-
-      if (Build.watchCallback && watchMethods) {
-        // this instance is watching for when this property changed
-        for (let i = 0; i < watchMethods.length; i++) {
-          try {
-            // fire off each of the watch methods that are watching this property
-            instance[watchMethods[i]].call(instance, newVal, oldVal, memberName);
-          } catch (e) {
-            console.error(e);
+      if (Build.watchCallback) {
+        watchMethods = values[WATCH_CB_PREFIX + memberName];
+        if (watchMethods) {
+          // this instance is watching for when this property changed
+          for (let i = 0; i < watchMethods.length; i++) {
+            try {
+              // fire off each of the watch methods that are watching this property
+              instance[watchMethods[i]].call(instance, newVal, oldVal, memberName);
+            } catch (e) {
+              console.error(e);
+            }
           }
         }
       }

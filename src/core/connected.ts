@@ -45,7 +45,8 @@ export function connectedCallback(plt: d.PlatformApi, cmpMeta: d.ComponentMeta, 
     plt.queue.tick(() =>
       // start loading this component mode's bundle
       // if it's already loaded then the callback will be synchronous
-      plt.requestBundle(cmpMeta, elm, initHostSnapshot(plt.domApi, cmpMeta, elm)));
+      plt.requestBundle(cmpMeta, elm, initHostSnapshot(plt.domApi, cmpMeta, elm))
+    );
   }
 }
 

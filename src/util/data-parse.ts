@@ -1,50 +1,46 @@
-import { ComponentListenersData, ComponentMemberData, ComponentMeta,
-  ComponentRegistry, LoadComponentRegistry, PropertyType } from '../declarations';
+import { ComponentListenersData, ComponentMeta, LoadComponentRegistry, PropertyType } from '../declarations';
 import { isDef } from './helpers';
 import { PROP_TYPE } from './constants';
 
 
-export function parseComponentLoader(cmpRegistryData: LoadComponentRegistry, cmpRegistry: ComponentRegistry, i?: number, d?: ComponentMemberData) {
+export function parseComponentLoader(cmpRegistryData: LoadComponentRegistry): ComponentMeta {
   // tag name will always be lower case
-  const cmpMeta: ComponentMeta = {
-    tagNameMeta: cmpRegistryData[0],
-    membersMeta: {
-      // every component defaults to always have
-      // the mode and color properties
-      // but only color should observe any attribute changes
-      'color': { attribName: 'color' }
-    }
-  };
-
-  // map of the bundle ids
-  // can contain modes, and array of esm and es5 bundle ids
-  cmpMeta.bundleIds = cmpRegistryData[1] as any;
-
   // parse member meta
   // this data only includes props that are attributes that need to be observed
   // it does not include all of the props yet
-  const memberData = cmpRegistryData[3];
+  const [tagNameMeta, bundleIds, , memberData, encapsulation, listenerMeta] = cmpRegistryData;
+
+  const membersMeta: any = {
+    // every component defaults to always have
+    // the mode and color properties
+    // but only color should observe any attribute changes
+    'color': { attribName: 'color' }
+  };
   if (memberData) {
-    for (i = 0; i < memberData.length; i++) {
-      d = memberData[i];
-      cmpMeta.membersMeta[d[0]] = {
+    for (let i = 0; i < memberData.length; i++) {
+      const d = memberData[i];
+      membersMeta[d[0]] = {
         memberType: d[1],
         reflectToAttr: !!d[2],
-        attribName: typeof d[3] === 'string' ? d[3] as string : d[3] ? d[0] : 0 as any,
+        attribName: typeof d[3] === 'string' ? d[3] : d[3] ? d[0] : 0 as any,
         propType: d[4]
       };
     }
   }
+  return {
+    tagNameMeta,
 
-  // encapsulation
-  cmpMeta.encapsulation = cmpRegistryData[4];
+    // map of the bundle ids
+    // can contain modes, and array of esm and es5 bundle ids
+    bundleIds,
+    membersMeta: { ...membersMeta },
 
-  if (cmpRegistryData[5]) {
+    // encapsulation
+    encapsulation,
+
     // parse listener meta
-    cmpMeta.listenersMeta = cmpRegistryData[5].map(parseListenerData);
-  }
-
-  return cmpRegistry[cmpMeta.tagNameMeta] = cmpMeta;
+    listenersMeta: listenerMeta ? listenerMeta.map(parseListenerData) : undefined
+  };
 }
 
 function parseListenerData(listenerData: ComponentListenersData) {

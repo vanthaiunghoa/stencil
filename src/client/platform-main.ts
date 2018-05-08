@@ -64,7 +64,10 @@ export function createPlatformMain(namespace: string, Context: d.CoreContext, wi
     propConnect: ctrlTag => proxyController(domApi, controllerComponents, ctrlTag),
     queue: (Context.queue = createQueueClient(App, win)),
     requestBundle,
-
+    attachStyles: (Build.styles) ? attachStyles : undefined,
+    activeRender: false,
+    isAppLoaded: false,
+    tmpDisconnected: false,
     ancestorHostElementMap: new WeakMap(),
     componentAppliedStyles: new WeakMap(),
     hasConnectedMap: new WeakMap(),
@@ -78,7 +81,7 @@ export function createPlatformMain(namespace: string, Context: d.CoreContext, wi
     onReadyCallbacksMap: new WeakMap(),
     queuedEvents: new WeakMap(),
     vnodeMap: new WeakMap(),
-    valuesMap: new WeakMap()
+    valuesMap: new WeakMap(),
   };
 
   // create the renderer that will be used
@@ -103,31 +106,26 @@ export function createPlatformMain(namespace: string, Context: d.CoreContext, wi
 
   function defineComponent(cmpMeta: d.ComponentMeta, HostElementConstructor: any) {
 
-    if (!globalDefined[cmpMeta.tagNameMeta]) {
+    const tagNameMeta = cmpMeta.tagNameMeta;
+    cmpRegistry[tagNameMeta] = cmpMeta;
+
+    if (!globalDefined[tagNameMeta]) {
       // keep a map of all the defined components
-      globalDefined[cmpMeta.tagNameMeta] = true;
+      globalDefined[tagNameMeta] = true;
 
       // initialize the members on the host element prototype
       initHostElement(plt, cmpMeta, HostElementConstructor.prototype, hydratedCssClass);
 
       if (Build.observeAttr) {
         // add which attributes should be observed
-        const observedAttributes: string[] = [];
-
         // at this point the membersMeta only includes attributes which should
         // be observed, it does not include all props yet, so it's safe to
         // loop through all of the props (attrs) and observed them
-        for (const propName in cmpMeta.membersMeta) {
-          if (cmpMeta.membersMeta[propName].attribName) {
-            observedAttributes.push(
-              // add this attribute to our array of attributes we need to observe
-              cmpMeta.membersMeta[propName].attribName
-            );
-          }
-        }
         // set the array of all the attributes to keep an eye on
         // https://www.youtube.com/watch?v=RBs21CFBALI
-        HostElementConstructor.observedAttributes = observedAttributes;
+        HostElementConstructor.observedAttributes = Object.values(cmpMeta.membersMeta)
+          .map(member => member.attribName)
+          .filter(attribName => !!attribName);
       }
 
       // define the custom element
@@ -136,7 +134,7 @@ export function createPlatformMain(namespace: string, Context: d.CoreContext, wi
   }
 
 
-  function requestBundle(cmpMeta: d.ComponentMeta, elm: d.HostElement) {
+  async function requestBundle(cmpMeta: d.ComponentMeta, elm: d.HostElement) {
     // set the "mode" property
     if (!elm.mode) {
       // looks like mode wasn't set as a property directly yet
@@ -156,37 +154,29 @@ export function createPlatformMain(namespace: string, Context: d.CoreContext, wi
       const bundleId = (typeof cmpMeta.bundleIds === 'string') ?
         cmpMeta.bundleIds :
         cmpMeta.bundleIds[elm.mode];
+
       const url = resourcesUrl + bundleId + ((useScopedCss(domApi.$supportsShadowDom, cmpMeta) ? '.sc' : '') + '.js');
 
-      // dynamic es module import() => woot!
-      __import(url).then(importedModule => {
+      try {
+        // dynamic es module import() => woot!
+        const importedModule = await __import(url);
         // async loading of the module is done
-        try {
-          // get the component constructor from the module
-          cmpMeta.componentConstructor = importedModule[dashToPascalCase(cmpMeta.tagNameMeta)];
+        // get the component constructor from the module
+        cmpMeta.componentConstructor = importedModule[dashToPascalCase(cmpMeta.tagNameMeta)];
 
-          // initialize this component constructor's styles
-          // it is possible for the same component to have difficult styles applied in the same app
-          initStyleTemplate(domApi, cmpMeta, cmpMeta.componentConstructor);
+        // initialize this component constructor's styles
+        // it is possible for the same component to have difficult styles applied in the same app
+        initStyleTemplate(domApi, cmpMeta, cmpMeta.componentConstructor);
 
-        } catch (e) {
-          // oh man, something's up
-          console.error(e);
-
-          // provide a bogus component constructor
-          // so the rest of the app acts as normal
-          cmpMeta.componentConstructor = class {} as any;
-        }
 
         // bundle all loaded up, let's continue
         queueUpdate(plt, elm);
 
-      }).catch(err => console.error(err, url));
+      } catch (e) {
+        // oh man, something's up
+        console.error(e);
+      }
     }
-  }
-
-  if (Build.styles) {
-    plt.attachStyles = attachStyles;
   }
 
   if (Build.devInspector) {
@@ -196,7 +186,7 @@ export function createPlatformMain(namespace: string, Context: d.CoreContext, wi
   // register all the components now that everything's ready
   // standard es2017 class extends HTMLElement
   (App.components || [])
-    .map(data => parseComponentLoader(data, cmpRegistry))
+    .map(parseComponentLoader)
     .forEach(cmpMeta => plt.defineComponent(cmpMeta, class extends HTMLElement {}));
 
   // create the componentOnReady fn

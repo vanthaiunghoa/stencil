@@ -68,6 +68,9 @@ export function createPlatformMainLegacy(namespace: string, Context: d.CoreConte
     propConnect: ctrlTag => proxyController(domApi, controllerComponents, ctrlTag),
     queue: (Context.queue = createQueueClient(App, win)),
     requestBundle: requestBundle,
+    isAppLoaded: false,
+    activeRender: false,
+    tmpDisconnected: false,
 
     ancestorHostElementMap: new WeakMap(),
     componentAppliedStyles: new WeakMap(),
@@ -368,8 +371,9 @@ export function createPlatformMainLegacy(namespace: string, Context: d.CoreConte
 
   // register all the components now that everything's ready
   (App.components || [])
-    .map(data => parseComponentLoader(data, cmpRegistry))
+    .map(parseComponentLoader)
     .forEach(cmpMeta => {
+      cmpRegistry[cmpMeta.tagNameMeta] = cmpMeta;
     // es5 way of extending HTMLElement
     function HostElement(self: any) {
       return HTMLElement.call(this, self);

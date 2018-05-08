@@ -185,7 +185,7 @@ function updateReferenceTypeImports(config: d.Config, importDataObj: ImportData,
   .filter((memberName) => {
     const member: d.MemberMeta = cmpMeta.membersMeta[memberName];
 
-    return [ MEMBER_TYPE.Prop, MEMBER_TYPE.PropMutable, MEMBER_TYPE.Method ].indexOf(member.memberType) !== -1 &&
+    return [ MEMBER_TYPE.Prop, MEMBER_TYPE.PropMutable, MEMBER_TYPE.Method ].includes(member.memberType) &&
       member.attribType.typeReferences;
   })
   .reduce((obj, memberName) => {
@@ -345,7 +345,7 @@ function attributesToMultiLineString(attributes: TypeInfo, optional = true, padd
 function membersToPropAttributes(membersMeta: d.MembersMeta): TypeInfo {
   const interfaceData = Object.keys(membersMeta)
     .filter((memberName) => {
-      return [ MEMBER_TYPE.Prop, MEMBER_TYPE.PropMutable ].indexOf(membersMeta[memberName].memberType) !== -1;
+      return [ MEMBER_TYPE.Prop, MEMBER_TYPE.PropMutable ].includes(membersMeta[memberName].memberType);
     })
     .reduce((obj, memberName) => {
       const member: d.MemberMeta = membersMeta[memberName];
@@ -366,7 +366,7 @@ function membersToPropAttributes(membersMeta: d.MembersMeta): TypeInfo {
 function membersToMethodAttributes(membersMeta: d.MembersMeta): TypeInfo {
   const interfaceData = Object.keys(membersMeta)
     .filter((memberName) => {
-      return [ MEMBER_TYPE.Method ].indexOf(membersMeta[memberName].memberType) !== -1;
+      return [ MEMBER_TYPE.Method ].includes(membersMeta[memberName].memberType);
     })
     .reduce((obj, memberName) => {
       const member: d.MemberMeta = membersMeta[memberName];

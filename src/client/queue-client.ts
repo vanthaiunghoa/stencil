@@ -1,7 +1,7 @@
 import * as d from '../declarations';
 
 
-export function createQueueClient(App: d.AppGlobal, win: Window) {
+export function createQueueClient(App: d.AppGlobal, win: Window): d.QueueApi {
   const now: d.Now = () => win.performance.now();
 
   const resolved = Promise.resolve();
@@ -14,6 +14,18 @@ export function createQueueClient(App: d.AppGlobal, win: Window) {
 
   if (!App.raf) {
     App.raf = win.requestAnimationFrame.bind(win);
+  }
+
+  function queueTask(queue: Function[]) {
+    return (cb: d.RafCallback) => {
+      // queue dom reads
+      queue.push(cb);
+
+      if (!rafPending) {
+        rafPending = true;
+        App.raf(flush);
+      }
+    };
   }
 
   function consume(queue: Function[]) {
@@ -84,25 +96,8 @@ export function createQueueClient(App: d.AppGlobal, win: Window) {
       }
     },
 
-    read(cb: d.RafCallback) {
-      // queue dom reads
-      domReads.push(cb);
+    read: queueTask(domReads),
+    write: queueTask(domWrites),
 
-      if (!rafPending) {
-        rafPending = true;
-        App.raf(flush);
-      }
-    },
-
-    write(cb: d.RafCallback) {
-      // queue dom writes
-      domWrites.push(cb);
-
-      if (!rafPending) {
-        rafPending = true;
-        App.raf(flush);
-      }
-    }
-
-  } as d.QueueApi;
+  };
 }

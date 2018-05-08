@@ -79,7 +79,13 @@ function formatMembers(membersMeta: d.MembersMeta) {
       memberMeta.memberType /* 1 - memberType */
     ];
 
-    if (memberMeta.propType === PROP_TYPE.Boolean || memberMeta.propType === PROP_TYPE.Number || memberMeta.propType === PROP_TYPE.String || memberMeta.propType === PROP_TYPE.Any) {
+    if (memberMeta.propType === PROP_TYPE.Unknown) {
+      // do not observe the attribute
+      d.push(0); /* 2 - reflectToAttr */
+      d.push(0); /* 3 - attribName */
+      d.push(PROP_TYPE.Unknown); /* 4 - propType */
+
+    } else {
       // observe the attribute
 
       if (memberMeta.reflectToAttr) {
@@ -101,11 +107,6 @@ function formatMembers(membersMeta: d.MembersMeta) {
 
       d.push(memberMeta.propType); /* 4 - propType */
 
-    } else {
-      // do not observe the attribute
-      d.push(0); /* 2 - reflectToAttr */
-      d.push(0); /* 3 - attribName */
-      d.push(PROP_TYPE.Unknown); /* 4 - propType */
     }
 
     if (memberMeta.ctrlId) {

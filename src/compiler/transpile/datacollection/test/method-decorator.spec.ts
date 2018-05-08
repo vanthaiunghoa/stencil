@@ -1,6 +1,7 @@
 import { gatherMetadata } from './test-utils';
 import { getMethodDecoratorMeta } from '../method-decorator';
 import * as path from 'path';
+import { MEMBER_TYPE } from '../../../../util/constants';
 
 
 describe('method decorator', () => {
@@ -14,7 +15,7 @@ describe('method decorator', () => {
 
     expect(response).toEqual({
       create: {
-        memberType: 6,
+        memberType: MEMBER_TYPE.Method,
         attribType: {
           text: '(opts?: any) => any',
           typeReferences: {
