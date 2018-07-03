@@ -1,6 +1,12 @@
 import * as d from '../../../declarations';
 import { createHash } from 'crypto';
 import { ForkOptions, fork } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+
+
+const filePath = path.join(__dirname, '__main.txt');
+fs.writeFileSync(filePath, '');
 
 
 export class WorkerFarm {
@@ -12,6 +18,8 @@ export class WorkerFarm {
   isExisting = false;
   logger: d.Logger;
   singleThreadRunner: d.WorkerRunner;
+  retryTmrId: any;
+  workerIds = 0;
 
   constructor(modulePath: string, options: d.WorkerOptions = {}) {
     this.options = Object.assign({}, DEFAULT_OPTIONS, options);
@@ -25,6 +33,11 @@ export class WorkerFarm {
     if (this.options.maxConcurrentWorkers > 1) {
       this.startWorkers();
 
+      process.once('exit', () => {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - process.once exit, destroy`);
+        this.destroy();
+      });
+
     } else {
       this.workerModule = require(modulePath);
       this.singleThreadRunner = new this.workerModule.createRunner();
@@ -32,11 +45,16 @@ export class WorkerFarm {
   }
 
   run(methodName: string, args?: any[], opts: d.WorkerRunnerOptions = {}) {
+
+    fs.appendFileSync(filePath, `${Date.now()} - methodName: ${methodName}`);
+
     if (this.isExisting) {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - process exited, methodName: ${methodName}`);
       return Promise.reject(`process exited`);
     }
 
     if (this.singleThreadRunner) {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - singleThreadRunner, methodName: ${methodName}`);
       return this.singleThreadRunner(methodName, args);
     }
 
@@ -50,21 +68,25 @@ export class WorkerFarm {
       };
 
       if (typeof opts.workerKey === 'string') {
-        // this tasl has a worker key so that it always uses
+        // this task has a worker key so that it always uses
         // the same worker, this way it can reuse that worker's cache again
         // let's figure out its worker id which should always be
         // the same id number for the same worker key string
         const workerId = getWorkerIdFromKey(opts.workerKey, this.workers);
         const worker = this.workers.find(w => w.workerId === workerId);
         if (!worker) {
+          fs.appendFileSync(filePath, `\n\n${Date.now()} - invalid worker id for task, methodName: ${methodName}`);
           task.reject(`invalid worker id for task: ${task}`);
         } else {
+          fs.appendFileSync(filePath, `\n\n${Date.now()} - send task, workerId: ${workerId}, methodName: ${methodName}`);
           this.send(worker, task);
+          this.processTaskQueue();
         }
 
       } else {
         // add this task to the queue to be processed
         // and assigned to the next available worker
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - queue to process, methodName: ${methodName}, this.taskQueue.length: ${this.taskQueue}`);
         this.taskQueue.push(task);
         this.processTaskQueue();
       }
@@ -72,19 +94,15 @@ export class WorkerFarm {
   }
 
   startWorkers() {
-    for (let workerId = 0; workerId < this.options.maxConcurrentWorkers; workerId++) {
-      const worker = this.createWorker(workerId);
-
-      worker.tasks = [];
-      worker.totalTasksAssigned = 0;
-
-      this.workers.push(worker);
+    while (this.workers.length < this.options.maxConcurrentWorkers) {
+      this.createWorker();
     }
-
-    process.once('exit', this.destroy.bind(this));
   }
 
-  createWorker(workerId: number) {
+  createWorker() {
+    const workerId = this.workerIds++;
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - createWorker ${workerId}`);
+
     const argv = [
       `--start-worker`,
       `--worker-id=${workerId}`
@@ -100,17 +118,24 @@ export class WorkerFarm {
     const worker: d.WorkerProcess = {
       workerId: workerId,
       taskIds: 0,
+      tasks: [],
+      totalTasksAssigned: 0,
       send: (msg: d.WorkerMessageData) => childProcess.send(msg),
-      kill: () => childProcess.kill('SIGKILL')
+      kill: () => {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - worker SIGKILL exit`);
+        childProcess.kill('SIGKILL');
+      }
     };
 
     childProcess.on('message', this.receiveMessageFromWorker.bind(this));
 
     childProcess.once('exit', code => {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - childProcess exit, ${code}`);
       this.onWorkerExit(workerId, code);
     });
 
     childProcess.on('error', err => {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - childProcess error, ${err}`);
       this.receiveMessageFromWorker({
         workerId: workerId,
         error: {
@@ -120,10 +145,13 @@ export class WorkerFarm {
       });
     });
 
+    this.workers.push(worker);
+
     return worker;
   }
 
   onWorkerExit(workerId: number, exitCode: number) {
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - onWorkerExit, workerId: ${workerId}, ${exitCode}`);
     const worker = this.workers.find(w => w.workerId === workerId);
     if (!worker) {
       return;
@@ -132,16 +160,19 @@ export class WorkerFarm {
     worker.exitCode = exitCode;
 
     setTimeout(() => {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - onWorkerExit, setTimeout, workerId: ${workerId}, ${exitCode}`);
       this.stopWorker(workerId);
     }, 10);
   }
 
   stopWorker(workerId: number) {
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker ${workerId}`);
     const worker = this.workers.find(w => w.workerId === workerId);
     if (worker && !worker.isExisting) {
       worker.isExisting = true;
 
       worker.tasks.forEach(task => {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker, reject ${workerId}`);
         task.reject(WORKER_EXITED_MSG);
       });
       worker.tasks.length = 0;
@@ -152,6 +183,7 @@ export class WorkerFarm {
 
       const tmr = setTimeout(() => {
         if (worker.exitCode == null) {
+          fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker, kill ${workerId}`);
           worker.kill();
         }
       }, this.options.forcedKillTime);
@@ -160,6 +192,7 @@ export class WorkerFarm {
 
       const index = this.workers.indexOf(worker);
       if (index > -1) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker, splice ${workerId}`);
         this.workers.splice(index, 1);
       }
     }
@@ -169,17 +202,20 @@ export class WorkerFarm {
     // message sent back from a worker process
     if (this.isExisting) {
       // already exiting, don't bother
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, isExisting`);
       return;
     }
 
     const worker = this.workers.find(w => w.workerId === msg.workerId);
     if (!worker) {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - Received message for unknown worker (${msg.workerId})`);
       this.logger.error(`Received message for unknown worker (${msg.workerId})`);
       return;
     }
 
     const task = worker.tasks.find(w => w.taskId === msg.taskId);
     if (!task) {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - Worker (${worker.workerId}) received message for unknown taskId (${msg.taskId})`);
       this.logger.error(`Worker (${worker.workerId}) received message for unknown taskId (${msg.taskId})`);
       return;
     }
@@ -195,8 +231,10 @@ export class WorkerFarm {
 
     process.nextTick(() => {
       if (msg.error) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, workerId: ${msg.workerId}, taskId: ${msg.taskId}, msg.error ${msg.error.message}`);
         task.reject(msg.error.message);
       } else {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, workerId: ${msg.workerId}, taskId: ${msg.taskId}, taskId: ${msg.methodName}, msg.value ${JSON.stringify(msg.value, null, 2)}`);
         task.resolve(msg.value);
       }
 
@@ -205,24 +243,27 @@ export class WorkerFarm {
       task.reject = null;
       task.resolve = null;
       task.timer = null;
-    });
 
-    // allow any outstanding tasks to be processed
-    this.processTaskQueue();
+      // allow any outstanding tasks to be processed
+      this.processTaskQueue();
+    });
   }
 
   workerTimeout(workerId: number) {
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - workerTimeout ${workerId}`);
     const worker = this.workers.find(w => w.workerId === workerId);
     if (!worker) {
       return;
     }
 
     worker.tasks.forEach(task => {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - Worker (${workerId}) timed out! Canceled "${task.methodName}" task.`);
+
       this.receiveMessageFromWorker({
         taskId: task.taskId,
         workerId: workerId,
         error: {
-          message: `Worker (${workerId}) timed out! Canceled "${task.methodName}" task.`
+          message: `\n\n${Date.now()} - Worker (${workerId}) timed out! Canceled "${task.methodName}" task.`
         }
       });
     });
@@ -231,14 +272,26 @@ export class WorkerFarm {
   }
 
   processTaskQueue() {
+    clearTimeout(this.retryTmrId);
+
+    if (this.options.maxConcurrentWorkers > 1 && this.workers.length < this.options.maxConcurrentWorkers) {
+      // start up some more workers if we had some exited
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue, startWorkers, this.workers.length: ${this.workers.length}`);
+      this.startWorkers();
+    }
+
     while (this.taskQueue.length > 0) {
       const worker = nextAvailableWorker(this.workers, this.options.maxConcurrentTasksPerWorker);
       if (worker) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue ${this.taskQueue.length}, send`);
         // we found a worker to send this task to
         this.send(worker, this.taskQueue.shift());
 
       } else {
         // no worker available ATM, we'll try again later
+        // the timeout is just a fallback
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue ${this.taskQueue.length}, no worker available ATM, we'll try again later. Tasks: ${this.taskQueue.map(q => q.methodName)}`);
+        this.retryTmrId = setTimeout(this.processTaskQueue.bind(this), 100);
         break;
       }
     }
@@ -254,6 +307,7 @@ export class WorkerFarm {
     worker.tasks.push(task);
     worker.totalTasksAssigned++;
 
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - send, workerId: ${worker.workerId}, taskId: ${task.taskId}, methodName: ${task.methodName}`);
     worker.send({
       workerId: worker.workerId,
       taskId: task.taskId,
@@ -262,7 +316,7 @@ export class WorkerFarm {
     });
 
     // no need to keep these args in memory at this point
-    task.args = null;
+    // task.args = null;
 
     if (this.options.maxTaskTime !== Infinity) {
       task.timer = setTimeout(this.workerTimeout.bind(this, worker.workerId), this.options.maxTaskTime);
@@ -314,7 +368,7 @@ export function nextAvailableWorker(workers: d.WorkerProcess[], maxConcurrentTas
     if (a.tasks.length < b.tasks.length) return -1;
     if (a.tasks.length > b.tasks.length) return 1;
 
-    // all workers have the same number of active takss, so next sort
+    // all workers have the same number of active tasks, so next sort
     // by worker with the fewest total tasks that have been assigned
     if (a.totalTasksAssigned < b.totalTasksAssigned) return -1;
     if (a.totalTasksAssigned > b.totalTasksAssigned) return 1;
@@ -327,7 +381,7 @@ export function nextAvailableWorker(workers: d.WorkerProcess[], maxConcurrentTas
 
 
 function getWorkerIdFromKey(workerKey: string, workers: d.WorkerProcess[]) {
-  const hashChar = createHash('sha1')
+  const hashChar = createHash('md5')
                      .update(workerKey)
                      .digest('base64')
                      .charAt(0);

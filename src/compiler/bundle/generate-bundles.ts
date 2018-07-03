@@ -151,34 +151,58 @@ async function writeBundleJSFile(config: d.Config, compilerCtx: d.CompilerCtx, f
 async function generateBundleModes(config: d.Config, compilerCtx: d.CompilerCtx, buildCtx: d.BuildCtx, entryModules: d.EntryModule[], jsModules: d.JSModuleMap, bundleKeys: { [key: string]: string }) {
   const timeSpan = buildCtx.createTimeSpan(`generateBundleModes started`, true);
 
-  await Promise.all(
-    entryModules.map(async entryModule => {
-      const bundleKeyPath = `${entryModule.entryKey}.js`;
-      bundleKeys[bundleKeyPath] = entryModule.entryKey;
-      entryModule.modeNames = entryModule.modeNames || [];
+  const promises = entryModules.map(async entryModule => {
+    await generateBundleModesEntryModule(config, compilerCtx, buildCtx, jsModules, bundleKeys, entryModule);
+  });
 
-      await Promise.all(
-        entryModule.modeNames.map(async modeName => {
-          const jsCode = Object.keys(jsModules).reduce((all, moduleType: 'esm' | 'es5' | 'esmEs5') => {
+  buildCtx.debug(`generateBundleModes promises: ${promises.length}`);
 
-            if (!jsModules[moduleType][bundleKeyPath] || !jsModules[moduleType][bundleKeyPath].code) {
-              return all;
-            }
-
-            return {
-              ...all,
-              [moduleType]: jsModules[moduleType][bundleKeyPath].code
-            };
-
-          }, {} as {[key: string]: string});
-
-          await generateBundleMode(config, compilerCtx, buildCtx, entryModule, modeName, jsCode as any);
-        })
-      );
-    })
-  );
+  await Promise.all(promises);
 
   timeSpan.finish(`generateBundleModes finished`);
+}
+
+
+async function generateBundleModesEntryModule(config: d.Config, compilerCtx: d.CompilerCtx, buildCtx: d.BuildCtx, jsModules: d.JSModuleMap, bundleKeys: { [key: string]: string }, entryModule: d.EntryModule) {
+  const bundleKeyPath = `${entryModule.entryKey}.js`;
+  bundleKeys[bundleKeyPath] = entryModule.entryKey;
+  entryModule.modeNames = entryModule.modeNames || [];
+
+  const promises = entryModule.modeNames.map(async modeName => {
+    await generateBundleModesEntryModuleMode(config, compilerCtx, buildCtx, jsModules, entryModule, bundleKeyPath, modeName);
+  });
+
+  const tmrId = setTimeout(() => {
+    console.log(`bundleKeyPath start: ${bundleKeyPath}`);
+  }, 5000);
+  // console.log(`bundleKeyPath start: ${bundleKeyPath}`);
+  await Promise.all(promises);
+  // console.log(`bundleKeyPath end: ${bundleKeyPath}`);
+  clearTimeout(tmrId);
+}
+
+
+async function generateBundleModesEntryModuleMode(config: d.Config, compilerCtx: d.CompilerCtx, buildCtx: d.BuildCtx, jsModules: d.JSModuleMap, entryModule: d.EntryModule, bundleKeyPath: string, modeName: string) {
+  const jsCode = Object.keys(jsModules).reduce((all, moduleType: 'esm' | 'es5' | 'esmEs5') => {
+
+    if (!jsModules[moduleType][bundleKeyPath] || !jsModules[moduleType][bundleKeyPath].code) {
+      return all;
+    }
+
+    return {
+      ...all,
+      [moduleType]: jsModules[moduleType][bundleKeyPath].code
+    };
+
+  }, {} as {[key: string]: string});
+
+  const tmrId = setTimeout(() => {
+    console.log(`generateBundleMode: ${bundleKeyPath} ${modeName}`);
+  }, 5000);
+  // console.log(`generateBundleMode start: ${bundleKeyPath} ${modeName}`);
+  await generateBundleMode(config, compilerCtx, buildCtx, entryModule, modeName, jsCode as any);
+  // console.log(`generateBundleMode end: ${bundleKeyPath} ${modeName}`);
+  clearTimeout(tmrId);
 }
 
 

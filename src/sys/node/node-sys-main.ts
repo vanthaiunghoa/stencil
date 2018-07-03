@@ -11,6 +11,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as url from 'url';
 
+const filePath = path.join(__dirname, '__node-sys.txt');
+fs.writeFileSync(filePath, '');
+
 
 export class NodeSystem implements d.StencilSystem {
   private packageJsonData: d.PackageJsonData;
@@ -255,7 +258,26 @@ export class NodeSystem implements d.StencilSystem {
   }
 
   minifyJs(input: string, opts?: any) {
-    return this.sysWorker.run('minifyJs', [input, opts]);
+    const id = ids++;
+
+    try {
+
+
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - id: ${id} minifyJs start: ${input}`);
+
+      return this.sysWorker.run('minifyJs', [input, opts]).then(d => {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - id: ${id} minifyJs end`);
+        return d;
+
+      }).catch(err => {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - id: ${id} minifyJs err: ${err}`);
+      });
+
+    } catch (e) {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - minifyJs e: ${e}`);
+    }
+
+    return Promise.resolve('hi');
   }
 
   minimatch(filePath: string, pattern: string, opts: any) {
@@ -371,3 +393,5 @@ export class NodeSystem implements d.StencilSystem {
   }
 
 }
+
+let ids = 0;

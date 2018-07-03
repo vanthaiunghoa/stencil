@@ -13,13 +13,10 @@ export class TestWorkerFarm extends WorkerFarm {
     super(modulePath, options);
   }
 
-  createWorker(workerId: number) {
-    const worker: d.WorkerProcess = {
-      workerId: workerId,
-      taskIds: 0,
-      send: (msg: d.WorkerMessageData) => {/**/},
-      kill: () => {/**/},
-    };
+  createWorker() {
+    const worker = super.createWorker();
+    worker.send = () => {/**/};
+    worker.kill = () => {/**/};
     return worker;
   }
 }
