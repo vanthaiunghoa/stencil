@@ -11,9 +11,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as url from 'url';
 
-const filePath = path.join(__dirname, '__node-sys.txt');
-fs.writeFileSync(filePath, '');
-
 
 export class NodeSystem implements d.StencilSystem {
   private packageJsonData: d.PackageJsonData;
@@ -49,9 +46,9 @@ export class NodeSystem implements d.StencilSystem {
     }
   }
 
-  initWorkers(maxConcurrentWorkers: number) {
+  initWorkers(maxConcurrentWorkers: number, maxConcurrentTasksPerWorker: number) {
     if (this.sysWorker) {
-      return maxConcurrentWorkers;
+      return this.sysWorker.options;
     }
     const workerModulePath = require.resolve(path.join(this.distDir, 'sys', 'node', 'sys-worker.js'));
 
@@ -63,7 +60,8 @@ export class NodeSystem implements d.StencilSystem {
     }
 
     this.sysWorker = new WorkerFarm(workerModulePath, {
-      maxConcurrentWorkers: maxConcurrentWorkers
+      maxConcurrentWorkers: maxConcurrentWorkers,
+      maxConcurrentTasksPerWorker: maxConcurrentTasksPerWorker
     });
 
     this.addDestroy(() => {
@@ -72,7 +70,13 @@ export class NodeSystem implements d.StencilSystem {
       }
     });
 
-    return maxConcurrentWorkers;
+    return this.sysWorker.options;
+  }
+
+  cancelWorkerTasks() {
+    if (this.sysWorker) {
+      this.sysWorker.cancelTasks();
+    }
   }
 
   destroy() {
@@ -258,26 +262,7 @@ export class NodeSystem implements d.StencilSystem {
   }
 
   minifyJs(input: string, opts?: any) {
-    const id = ids++;
-
-    try {
-
-
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - id: ${id} minifyJs start: ${input}`);
-
-      return this.sysWorker.run('minifyJs', [input, opts]).then(d => {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - id: ${id} minifyJs end`);
-        return d;
-
-      }).catch(err => {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - id: ${id} minifyJs err: ${err}`);
-      });
-
-    } catch (e) {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - minifyJs e: ${e}`);
-    }
-
-    return Promise.resolve('hi');
+    return this.sysWorker.run('minifyJs', [input, opts]);
   }
 
   minimatch(filePath: string, pattern: string, opts: any) {
@@ -393,5 +378,3 @@ export class NodeSystem implements d.StencilSystem {
   }
 
 }
-
-let ids = 0;

@@ -1,6 +1,6 @@
 import * as d from '../../../declarations';
 import { createHash } from 'crypto';
-import { ForkOptions, fork } from 'child_process';
+import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -10,25 +10,31 @@ fs.writeFileSync(filePath, '');
 
 
 export class WorkerFarm {
-  options: d.WorkerOptions;
-  modulePath: string;
-  workerModule: any;
-  workers: d.WorkerProcess[] = [];
-  taskQueue: d.WorkerTask[] = [];
   isExisting = false;
-  logger: d.Logger;
+  modulePath: string;
+  options: d.WorkerOptions;
   singleThreadRunner: d.WorkerRunner;
-  retryTmrId: any;
-  workerIds = 0;
+  taskIds = 0;
+  tasks: d.WorkerTask[] = [];
+  workers: d.WorkerProcess[] = [];
+  processTaskQueueTmrId: any;
+
 
   constructor(modulePath: string, options: d.WorkerOptions = {}) {
-    this.options = Object.assign({}, DEFAULT_OPTIONS, options);
+    this.options = {
+      maxConcurrentWorkers: DEFAULT_MAX_WORKERS,
+      maxConcurrentTasksPerWorker: DEFAULT_MAX_TASKS_PER_WORKER
+    };
+
+    if (typeof options.maxConcurrentWorkers === 'number') {
+      this.options.maxConcurrentWorkers = options.maxConcurrentWorkers;
+    }
+
+    if (typeof options.maxConcurrentTasksPerWorker === 'number') {
+      this.options.maxConcurrentTasksPerWorker = options.maxConcurrentTasksPerWorker;
+    }
+
     this.modulePath = modulePath;
-    this.logger = {
-      error: function() {
-        console.error.apply(console, arguments);
-      }
-    } as any;
 
     if (this.options.maxConcurrentWorkers > 1) {
       this.startWorkers();
@@ -39,18 +45,18 @@ export class WorkerFarm {
       });
 
     } else {
-      this.workerModule = require(modulePath);
-      this.singleThreadRunner = new this.workerModule.createRunner();
+      const workerModule = require(modulePath);
+      this.singleThreadRunner = new workerModule.createRunner();
     }
   }
 
   run(methodName: string, args?: any[], opts: d.WorkerRunnerOptions = {}) {
 
-    fs.appendFileSync(filePath, `${Date.now()} - methodName: ${methodName}`);
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - run, methodName: ${methodName}`);
 
     if (this.isExisting) {
       fs.appendFileSync(filePath, `\n\n${Date.now()} - process exited, methodName: ${methodName}`);
-      return Promise.reject(`process exited`);
+      return Promise.reject(PROCESS_EXITED_MSG);
     }
 
     if (this.singleThreadRunner) {
@@ -60,313 +66,337 @@ export class WorkerFarm {
 
     return new Promise<any>((resolve, reject) => {
       const task: d.WorkerTask = {
+        taskId: this.taskIds++,
+        assignedWorkerPid: null,
+        workerKey: opts.workerKey,
         methodName: methodName,
         args: args,
         isLongRunningTask: !!opts.isLongRunningTask,
         resolve: resolve,
         reject: reject
       };
+      this.tasks.push(task);
 
-      if (typeof opts.workerKey === 'string') {
-        // this task has a worker key so that it always uses
-        // the same worker, this way it can reuse that worker's cache again
-        // let's figure out its worker id which should always be
-        // the same id number for the same worker key string
-        const workerId = getWorkerIdFromKey(opts.workerKey, this.workers);
-        const worker = this.workers.find(w => w.workerId === workerId);
-        if (!worker) {
-          fs.appendFileSync(filePath, `\n\n${Date.now()} - invalid worker id for task, methodName: ${methodName}`);
-          task.reject(`invalid worker id for task: ${task}`);
-        } else {
-          fs.appendFileSync(filePath, `\n\n${Date.now()} - send task, workerId: ${workerId}, methodName: ${methodName}`);
-          this.send(worker, task);
-          this.processTaskQueue();
-        }
-
-      } else {
-        // add this task to the queue to be processed
-        // and assigned to the next available worker
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - queue to process, methodName: ${methodName}, this.taskQueue.length: ${this.taskQueue}`);
-        this.taskQueue.push(task);
-        this.processTaskQueue();
-      }
+      this.processTaskQueue();
     });
   }
 
   startWorkers() {
-    while (this.workers.length < this.options.maxConcurrentWorkers) {
-      this.createWorker();
+    if (this.options.maxConcurrentWorkers > 1 && this.workers.length < this.options.maxConcurrentWorkers) {
+      while (this.workers.length < this.options.maxConcurrentWorkers) {
+        const worker = this.createWorker();
+        this.workers.push(worker);
+      }
     }
   }
 
   createWorker() {
-    const workerId = this.workerIds++;
-    fs.appendFileSync(filePath, `\n\n${Date.now()} - createWorker ${workerId}`);
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - createWorker`);
 
     const argv = [
-      `--start-worker`,
-      `--worker-id=${workerId}`
+      `--start-worker`
     ];
 
-    const options: ForkOptions = {
+    const options: cp.ForkOptions = {
       env: process.env,
       cwd: process.cwd()
     };
 
-    const childProcess = fork(this.modulePath, argv, options);
-
     const worker: d.WorkerProcess = {
-      workerId: workerId,
-      taskIds: 0,
-      tasks: [],
+      childProcess: cp.fork(this.modulePath, argv, options),
+      currentActiveTasks: 0,
       totalTasksAssigned: 0,
-      send: (msg: d.WorkerMessageData) => childProcess.send(msg),
-      kill: () => {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - worker SIGKILL exit`);
-        childProcess.kill('SIGKILL');
-      }
+      exitCode: null,
+      isExisting: false
     };
 
-    childProcess.on('message', this.receiveMessageFromWorker.bind(this));
+    worker.childProcess.on('message', this.receiveMessageFromWorker.bind(this));
 
-    childProcess.once('exit', code => {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - childProcess exit, ${code}`);
-      this.onWorkerExit(workerId, code);
-    });
-
-    childProcess.on('error', err => {
+    worker.childProcess.on('error', err => {
       fs.appendFileSync(filePath, `\n\n${Date.now()} - childProcess error, ${err}`);
       this.receiveMessageFromWorker({
-        workerId: workerId,
         error: {
-          message: `Worker (${workerId}) process error: ${err.message}`,
+          message: `Worker (${worker.childProcess.pid}) process error: ${err.message}`,
           stack: err.stack
         }
       });
     });
 
-    this.workers.push(worker);
+    worker.childProcess.once('exit', code => {
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - childProcess exit, ${code}`);
+      this.onWorkerExit(worker, code);
+    });
 
     return worker;
   }
 
-  onWorkerExit(workerId: number, exitCode: number) {
-    fs.appendFileSync(filePath, `\n\n${Date.now()} - onWorkerExit, workerId: ${workerId}, ${exitCode}`);
-    const worker = this.workers.find(w => w.workerId === workerId);
-    if (!worker) {
-      return;
-    }
+  onWorkerExit(worker: d.WorkerProcess, exitCode: number) {
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - onWorkerExit, pid: ${worker.childProcess.pid}, ${exitCode}`);
 
     worker.exitCode = exitCode;
 
-    setTimeout(() => {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - onWorkerExit, setTimeout, workerId: ${workerId}, ${exitCode}`);
-      this.stopWorker(workerId);
-    }, 10);
-  }
-
-  stopWorker(workerId: number) {
-    fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker ${workerId}`);
-    const worker = this.workers.find(w => w.workerId === workerId);
-    if (worker && !worker.isExisting) {
-      worker.isExisting = true;
-
-      worker.tasks.forEach(task => {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker, reject ${workerId}`);
-        task.reject(WORKER_EXITED_MSG);
-      });
-      worker.tasks.length = 0;
-
-      worker.send({
-        exitProcess: true
-      });
-
-      const tmr = setTimeout(() => {
-        if (worker.exitCode == null) {
-          fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker, kill ${workerId}`);
-          worker.kill();
-        }
-      }, this.options.forcedKillTime);
-
-      tmr.unref && tmr.unref();
-
-      const index = this.workers.indexOf(worker);
-      if (index > -1) {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - stopWorker, splice ${workerId}`);
-        this.workers.splice(index, 1);
-      }
+    const workerIndex = this.workers.indexOf(worker);
+    if (workerIndex > -1) {
+      this.workers.splice(workerIndex, 1);
     }
+
+    this.tasks
+      .filter(t => t.assignedWorkerPid === worker.childProcess.pid)
+      .forEach(t => {
+        t.assignedWorkerPid = null;
+      });
   }
 
   receiveMessageFromWorker(msg: d.WorkerMessageData) {
-    // message sent back from a worker process
-    if (this.isExisting) {
-      // already exiting, don't bother
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, isExisting`);
-      return;
-    }
-
-    const worker = this.workers.find(w => w.workerId === msg.workerId);
-    if (!worker) {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - Received message for unknown worker (${msg.workerId})`);
-      this.logger.error(`Received message for unknown worker (${msg.workerId})`);
-      return;
-    }
-
-    const task = worker.tasks.find(w => w.taskId === msg.taskId);
+    const task = this.tasks.find(t => t.taskId === msg.taskId);
     if (!task) {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - Worker (${worker.workerId}) received message for unknown taskId (${msg.taskId})`);
-      this.logger.error(`Worker (${worker.workerId}) received message for unknown taskId (${msg.taskId})`);
       return;
     }
 
-    if (task.timer) {
-      clearTimeout(task.timer);
-    }
+    // since we've got a response from a worker about this task
+    // let's take it out of our list of tasks to process
+    removeTask(this.tasks, task);
 
-    const index = worker.tasks.indexOf(task);
-    if (index > -1) {
-      worker.tasks.splice(index, 1);
-    }
-
+    // let's throw this in a nextTick() just to cool things down a bit
     process.nextTick(() => {
       if (msg.error) {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, workerId: ${msg.workerId}, taskId: ${msg.taskId}, msg.error ${msg.error.message}`);
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, taskId: ${msg.taskId}, pid: ${msg.pid}, msg.error ${msg.error.message}`);
         task.reject(msg.error.message);
       } else {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, workerId: ${msg.workerId}, taskId: ${msg.taskId}, taskId: ${msg.methodName}, msg.value ${JSON.stringify(msg.value, null, 2)}`);
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - receiveMessageFromWorker, taskId: ${msg.taskId}, pid: ${msg.pid}, taskId: ${msg.methodName}`);
         task.resolve(msg.value);
       }
-
-      // overkill yes, but let's ensure we've cleaned up this task
-      task.args = null;
-      task.reject = null;
-      task.resolve = null;
-      task.timer = null;
-
-      // allow any outstanding tasks to be processed
-      this.processTaskQueue();
-    });
-  }
-
-  workerTimeout(workerId: number) {
-    fs.appendFileSync(filePath, `\n\n${Date.now()} - workerTimeout ${workerId}`);
-    const worker = this.workers.find(w => w.workerId === workerId);
-    if (!worker) {
-      return;
-    }
-
-    worker.tasks.forEach(task => {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - Worker (${workerId}) timed out! Canceled "${task.methodName}" task.`);
-
-      this.receiveMessageFromWorker({
-        taskId: task.taskId,
-        workerId: workerId,
-        error: {
-          message: `\n\n${Date.now()} - Worker (${workerId}) timed out! Canceled "${task.methodName}" task.`
-        }
-      });
     });
 
-    this.stopWorker(workerId);
+    // allow any outstanding tasks to be processed
+    this.processTaskQueue();
   }
 
   processTaskQueue() {
-    clearTimeout(this.retryTmrId);
+    clearTimeout(this.processTaskQueueTmrId);
 
-    if (this.options.maxConcurrentWorkers > 1 && this.workers.length < this.options.maxConcurrentWorkers) {
-      // start up some more workers if we had some exited
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue, startWorkers, this.workers.length: ${this.workers.length}`);
-      this.startWorkers();
-    }
+    this.startWorkers();
 
-    while (this.taskQueue.length > 0) {
-      const worker = nextAvailableWorker(this.workers, this.options.maxConcurrentTasksPerWorker);
-      if (worker) {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue ${this.taskQueue.length}, send`);
-        // we found a worker to send this task to
-        this.send(worker, this.taskQueue.shift());
+    let task: d.WorkerTask;
 
-      } else {
-        // no worker available ATM, we'll try again later
-        // the timeout is just a fallback
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue ${this.taskQueue.length}, no worker available ATM, we'll try again later. Tasks: ${this.taskQueue.map(q => q.methodName)}`);
-        this.retryTmrId = setTimeout(this.processTaskQueue.bind(this), 100);
+    // keep loooooping through each of the tasks
+    // that are ready to be processed
+    while ((task = getNextTask(this.tasks))) {
+      const successful = this.processTask(task);
+
+      if (!successful) {
+        // oh no!!
+        // looks like all the workers are already heavily tasked right now
+        this.processTaskQueueTmrId = setTimeout(this.processTaskQueue.bind(this), 100);
         break;
       }
     }
   }
 
-  send(worker: d.WorkerProcess, task: d.WorkerTask) {
-    if (!worker || !task) {
-      return;
+  processTask(task: d.WorkerTask) {
+    let worker: d.WorkerProcess;
+
+    if (task.workerKey != null) {
+      // this task has a worker key so that it always uses
+      // the same worker, this way it can reuse that worker's cache again
+      worker = getWorkerFromKey(task.workerKey, this.workers);
+      if (!worker) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - invalid worker id for task, pid: ${worker.childProcess.pid}`);
+        task.workerKey = null;
+        task.assignedWorkerPid = null;
+        return false;
+      }
+
+    } else {
+      // always recalculate
+      this.calcCurrentActiveTasks();
+
+      // get the next worker that's available to take on this task
+      worker = getNextWorker(this.tasks, this.workers, this.options.maxConcurrentTasksPerWorker);
+      if (!worker) {
+        // no worker available ATM, we'll try again later
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - processTaskQueue ${this.tasks.length}, no worker available ATM, we'll try again later`);
+        return false;
+      }
     }
 
-    task.taskId = worker.taskIds++;
+    return this.processTaskWithWorker(task, worker);
+  }
 
-    worker.tasks.push(task);
+  processTaskWithWorker(task: d.WorkerTask, worker: d.WorkerProcess) {
+    // we found which worker we should use for this task
+    // let's set the child process id as this task's active worker pid
+    const taskId = task.taskId;
+    task.assignedWorkerPid = worker.childProcess.pid;
     worker.totalTasksAssigned++;
 
-    fs.appendFileSync(filePath, `\n\n${Date.now()} - send, workerId: ${worker.workerId}, taskId: ${task.taskId}, methodName: ${task.methodName}`);
-    worker.send({
-      workerId: worker.workerId,
+    // create the message we'll send to the worker out of the task data
+    const msg: d.WorkerMessageData = {
       taskId: task.taskId,
       methodName: task.methodName,
       args: task.args
+    };
+
+    const timerId = setTimeout(() => {
+      const task = this.tasks.find(t => t.taskId === taskId);
+      if (task && task.assignedWorkerPid != null) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - retry, pid: ${worker.childProcess.pid}, taskId: ${taskId}`);
+        task.assignedWorkerPid = null;
+        this.processTaskQueue();
+      }
+    }, 5000);
+
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - send, pid: ${worker.childProcess.pid}, taskId: ${task.taskId}`);
+
+    // attempt to send the message to the worker
+    const sendSuccess = worker.childProcess.send(msg, sendError => {
+      if (sendError == null) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - clearTimeout, pid: ${worker.childProcess.pid}, taskId: ${task.taskId}`);
+        clearTimeout(timerId);
+
+      } else {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - sendError, pid: ${worker.childProcess.pid}, taskId: ${task.taskId}, sendError: ${sendError}`);
+      }
     });
 
-    // no need to keep these args in memory at this point
-    // task.args = null;
-
-    if (this.options.maxTaskTime !== Infinity) {
-      task.timer = setTimeout(this.workerTimeout.bind(this, worker.workerId), this.options.maxTaskTime);
+    if (sendSuccess) {
+      clearTimeout(timerId);
     }
+
+    // successfully sent the message to the worker
+    // now we play the waiting game...
+    // •͡˘㇁•͡˘
+    return true;
+  }
+
+  cancelTasks() {
+    this.tasks.forEach(task => {
+      task.reject(TASK_CANCELED_MSG);
+    });
+    this.tasks.length = 0;
   }
 
   destroy() {
     if (!this.isExisting) {
       this.isExisting = true;
 
+      this.cancelTasks();
+
       // workers may already be getting removed
       // so doing it this way cuz we don't know if the
       // order of the workers array is consistent
-      const workerIds = this.workers.map(worker => worker.workerId);
-      workerIds.forEach(workerId => {
-        this.stopWorker(workerId);
+      this.workers.forEach(worker => {
+        this.destroyWorker(worker);
       });
     }
+  }
+
+  destroyWorker(worker: d.WorkerProcess) {
+    fs.appendFileSync(filePath, `\n\n${Date.now()} - destroyWorker ${worker.childProcess.pid}`);
+
+    if (worker && !worker.isExisting) {
+      worker.isExisting = true;
+
+      this.tasks
+        .filter(t => t.assignedWorkerPid === worker.childProcess.pid)
+        .forEach(t => {
+          t.assignedWorkerPid = null;
+        });
+
+      worker.childProcess.send({
+        exitProcess: true
+      });
+
+      const tmr = setTimeout(() => {
+        if (worker.exitCode == null) {
+          fs.appendFileSync(filePath, `\n\n${Date.now()} - destroyWorker, kill ${worker.childProcess.pid}`);
+          worker.childProcess.kill();
+        }
+      }, FORCED_KILL_TIME);
+
+      tmr.unref && tmr.unref();
+
+      const workerIndex = this.workers.indexOf(worker);
+      if (workerIndex > -1) {
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - destroyWorker, splice ${worker.childProcess.pid}`);
+        this.workers.splice(workerIndex, 1);
+      }
+    }
+  }
+
+
+  calcCurrentActiveTasks() {
+    this.workers.forEach(w => {
+      w.currentActiveTasks = this.tasks.filter(t => t.assignedWorkerPid === w.childProcess.pid).length;
+    });
   }
 
 }
 
 
-export function nextAvailableWorker(workers: d.WorkerProcess[], maxConcurrentTasksPerWorker: number) {
+function removeTask(tasks: d.WorkerTask[], task: d.WorkerTask) {
+  const taskIndex = tasks.indexOf(task);
+  if (taskIndex > -1) {
+    tasks.splice(taskIndex, 1);
+  }
+}
+
+
+export function getNextTask(tasks: d.WorkerTask[]) {
+  const tasksWithoutWorkers = tasks.filter(t => t.assignedWorkerPid == null);
+
+  if (tasksWithoutWorkers.length === 0) {
+    return null;
+  }
+
+  const sortedTasks = tasksWithoutWorkers.sort((a, b) => {
+    if (a.taskId < b.taskId) return -1;
+    if (a.taskId > b.taskId) return 1;
+    return 0;
+  });
+
+  return sortedTasks[0];
+}
+
+
+export function getNextWorker(tasks: d.WorkerTask[], workers: d.WorkerProcess[], maxConcurrentTasksPerWorker: number) {
   const availableWorkers = workers.filter(w => {
-    if (w.tasks.length >= maxConcurrentTasksPerWorker) {
+    if (w.isExisting) {
+      // nope, don't use this worker if it's exiting
+      return false;
+    }
+
+    if (w.currentActiveTasks >= maxConcurrentTasksPerWorker) {
       // do not use this worker if it's at its max
       return false;
     }
 
-    if (w.tasks.some(t => t && t.isLongRunningTask)) {
+    // get all of the tasks this worker is actively working on
+    const activeWorkerTasks = tasks.filter(t => t.assignedWorkerPid === w.childProcess.pid);
+
+    // see if any of the worker's tasks has a long running task
+    if (activeWorkerTasks.some(t => t && t.isLongRunningTask)) {
       // one of the tasks for this worker is a long running task
       // so leave this worker alone and let it focus
       // basically so the many little tasks don't have to wait up on the long task
+      // (validatingType locks up the thread, so don't use that thread for the time being!)
       return false;
     }
 
-    // let's use this worker for this task
+    // this is an available worker up for the job, bring it!
     return true;
   });
 
   if (availableWorkers.length === 0) {
-    // all workers are pretty tasked at the moment, please come back later. Thank you.
+    // all workers are pretty tasked at the moment
+    // Please come back again. Thank you for your business.
     return null;
   }
 
   const sorted = availableWorkers.sort((a, b) => {
     // worker with the fewest active tasks first
-    if (a.tasks.length < b.tasks.length) return -1;
-    if (a.tasks.length > b.tasks.length) return 1;
+    if (a.currentActiveTasks < b.currentActiveTasks) return -1;
+    if (a.currentActiveTasks > b.currentActiveTasks) return 1;
 
     // all workers have the same number of active tasks, so next sort
     // by worker with the fewest total tasks that have been assigned
@@ -380,20 +410,18 @@ export function nextAvailableWorker(workers: d.WorkerProcess[], maxConcurrentTas
 }
 
 
-function getWorkerIdFromKey(workerKey: string, workers: d.WorkerProcess[]) {
+function getWorkerFromKey(workerKey: string, workers: d.WorkerProcess[]) {
   const hashChar = createHash('md5')
                      .update(workerKey)
                      .digest('base64')
                      .charAt(0);
 
-  const workerIds = workers.map(w => w.workerId);
-
   const b64Int = B64_TABLE[hashChar];
   const dv = b64Int / 64;
-  const mt = (workerIds.length - 1) * dv;
+  const mt = (workers.length - 1) * dv;
   const workerIndex = Math.round(mt);
 
-  return workerIds[workerIndex];
+  return workers[workerIndex];
 }
 
 const B64_TABLE: { [char: string]: number } = {
@@ -406,11 +434,10 @@ const B64_TABLE: { [char: string]: number } = {
 };
 
 
-const DEFAULT_OPTIONS: d.WorkerOptions = {
-  maxConcurrentWorkers: 1,
-  maxConcurrentTasksPerWorker: 5,
-  maxTaskTime: 120000,
-  forcedKillTime: 100
-};
+const DEFAULT_MAX_WORKERS = 1;
+const DEFAULT_MAX_TASKS_PER_WORKER = 5;
 
-export const WORKER_EXITED_MSG = `worker has exited`;
+export const PROCESS_EXITED_MSG = `process exited`;
+export const TASK_CANCELED_MSG = `task canceled`;
+export const TASK_MAX_ATTEMPTS_MSG = `task max attempts`;
+const FORCED_KILL_TIME = 100;

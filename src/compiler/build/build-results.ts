@@ -6,8 +6,7 @@ import { hasError, normalizePath } from '../util';
 
 
 export async function generateBuildResults(config: d.Config, compilerCtx: d.CompilerCtx, buildCtx: d.BuildCtx) {
-  // create the build results that get returned
-  const getGzipSize = config.outputTargets.some(o => o.type === 'stats');
+  const timeSpan = buildCtx.createTimeSpan(`generateBuildResults started`, true);
 
   const buildResults: d.BuildResults = {
     buildId: buildCtx.buildId,
@@ -31,9 +30,7 @@ export async function generateBuildResults(config: d.Config, compilerCtx: d.Comp
 
     components: [],
 
-    entries: await Promise.all(buildCtx.entryModules.map(en => {
-      return getEntryModule(config, buildCtx, getGzipSize, en);
-    }))
+    entries: await generateBuildResultsEntries(config, buildCtx)
   };
 
   const hmr = genereateHmr(config, compilerCtx, buildCtx);
@@ -45,9 +42,25 @@ export async function generateBuildResults(config: d.Config, compilerCtx: d.Comp
     buildResults.components.push(...en.components);
   });
 
+  timeSpan.finish(`generateBuildResults finished`);
+
   return buildResults;
 }
 
+async function generateBuildResultsEntries(config: d.Config, buildCtx: d.BuildCtx) {
+  const timeSpan = buildCtx.createTimeSpan(`generateBuildResultsEntries started`, true);
+
+  // create the build results that get returned
+  const getGzipSize = config.outputTargets.some(o => o.type === 'stats');
+
+  const entries = await Promise.all(buildCtx.entryModules.map(en => {
+    return getEntryModule(config, buildCtx, getGzipSize, en);
+  }));
+
+  timeSpan.finish(`generateBuildResultsEntries finished`);
+
+  return entries;
+}
 
 async function getEntryModule(config: d.Config, buildCtx: d.BuildCtx, getGzipSize: boolean, en: d.EntryModule) {
   en.modeNames = en.modeNames || [];

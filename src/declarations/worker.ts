@@ -2,33 +2,54 @@
 export interface WorkerOptions {
   maxConcurrentWorkers?: number;
   maxConcurrentTasksPerWorker?: number;
-  maxTaskTime?: number;
-  forcedKillTime?: number;
 }
 
 export interface WorkerTask {
-  taskId?: number;
+  assignedWorkerPid: number;
+  workerKey: string;
+  taskId: number;
   methodName: string;
   args: any[];
   isLongRunningTask: boolean;
   resolve: (val: any) => any;
   reject: (msg: string) => any;
-  timer?: any;
 }
 
 export interface WorkerProcess {
-  workerId: number;
-  taskIds: number;
-  send?(msg: WorkerMessageData): void;
-  kill?(signal?: string): void;
-  tasks?: WorkerTask[];
-  totalTasksAssigned?: number;
-  exitCode?: number;
-  isExisting?: boolean;
+  childProcess: ChildProcess;
+  currentActiveTasks: number;
+  exitCode: number;
+  isExisting: boolean;
+  totalTasksAssigned: number;
+}
+
+export interface ChildProcess {
+  killed: boolean;
+  pid: number;
+  kill(signal?: string): void;
+  send(message: any, callback?: (error: Error) => void): boolean;
+  connected: boolean;
+  disconnect(): void;
+  unref(): void;
+  ref(): void;
+
+  on(event: string, listener: (...args: any[]) => void): this;
+  on(event: 'close', listener: (code: number, signal: string) => void): this;
+  on(event: 'disconnect', listener: () => void): this;
+  on(event: 'error', listener: (err: Error) => void): this;
+  on(event: 'exit', listener: (code: number, signal: string) => void): this;
+  on(event: 'message', listener: (message: any) => void): this;
+
+  once(event: string, listener: (...args: any[]) => void): this;
+  once(event: 'close', listener: (code: number, signal: string) => void): this;
+  once(event: 'disconnect', listener: () => void): this;
+  once(event: 'error', listener: (err: Error) => void): this;
+  once(event: 'exit', listener: (code: number, signal: string) => void): this;
+  once(event: 'message', listener: (message: any) => void): this;
 }
 
 export interface WorkerMessageData {
-  workerId?: number;
+  pid?: number;
   taskId?: number;
   modulePath?: string;
   methodName?: string;

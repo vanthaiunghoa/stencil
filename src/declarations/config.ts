@@ -31,6 +31,7 @@ export interface Config {
   logger?: d.Logger;
   logLevel?: 'error'|'warn'|'info'|'debug'|string;
   maxConcurrentWorkers?: number;
+  maxConcurrentTasksPerWorker?: number;
   minifyCss?: boolean;
   minifyJs?: boolean;
   namespace?: string;

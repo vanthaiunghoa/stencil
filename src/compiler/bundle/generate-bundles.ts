@@ -155,8 +155,6 @@ async function generateBundleModes(config: d.Config, compilerCtx: d.CompilerCtx,
     await generateBundleModesEntryModule(config, compilerCtx, buildCtx, jsModules, bundleKeys, entryModule);
   });
 
-  buildCtx.debug(`generateBundleModes promises: ${promises.length}`);
-
   await Promise.all(promises);
 
   timeSpan.finish(`generateBundleModes finished`);
@@ -172,13 +170,7 @@ async function generateBundleModesEntryModule(config: d.Config, compilerCtx: d.C
     await generateBundleModesEntryModuleMode(config, compilerCtx, buildCtx, jsModules, entryModule, bundleKeyPath, modeName);
   });
 
-  const tmrId = setTimeout(() => {
-    console.log(`bundleKeyPath start: ${bundleKeyPath}`);
-  }, 5000);
-  // console.log(`bundleKeyPath start: ${bundleKeyPath}`);
   await Promise.all(promises);
-  // console.log(`bundleKeyPath end: ${bundleKeyPath}`);
-  clearTimeout(tmrId);
 }
 
 
@@ -196,13 +188,7 @@ async function generateBundleModesEntryModuleMode(config: d.Config, compilerCtx:
 
   }, {} as {[key: string]: string});
 
-  const tmrId = setTimeout(() => {
-    console.log(`generateBundleMode: ${bundleKeyPath} ${modeName}`);
-  }, 5000);
-  // console.log(`generateBundleMode start: ${bundleKeyPath} ${modeName}`);
   await generateBundleMode(config, compilerCtx, buildCtx, entryModule, modeName, jsCode as any);
-  // console.log(`generateBundleMode end: ${bundleKeyPath} ${modeName}`);
-  clearTimeout(tmrId);
 }
 
 

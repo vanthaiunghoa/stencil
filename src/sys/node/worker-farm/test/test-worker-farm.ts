@@ -4,6 +4,8 @@ import * as path from 'path';
 
 
 export class TestWorkerFarm extends WorkerFarm {
+  private pids: number;
+
   constructor(options: d.WorkerOptions = {}) {
     if (typeof options.maxConcurrentWorkers !== 'number') {
       options.maxConcurrentWorkers = 4;
@@ -14,9 +16,21 @@ export class TestWorkerFarm extends WorkerFarm {
   }
 
   createWorker() {
-    const worker = super.createWorker();
-    worker.send = () => {/**/};
-    worker.kill = () => {/**/};
+    if (typeof this.pids !== 'number') {
+      this.pids = 0;
+    }
+    const worker: d.WorkerProcess = {
+      childProcess: {
+        send: () => true,
+        pid: this.pids++
+      } as any,
+      currentActiveTasks: 0,
+      totalTasksAssigned: 0,
+      exitCode: null,
+      isExisting: false
+    };
+
     return worker;
   }
+
 }

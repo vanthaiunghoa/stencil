@@ -16,19 +16,19 @@ export function attachMessageHandler(process: NodeJS.Process, runner: d.WorkerRu
 
     // build a message to send back to main
     const sendToMain: d.WorkerMessageData = {
-      workerId: receivedFromMain.workerId,
+      pid: process.pid,
       taskId: receivedFromMain.taskId
     };
 
     // call the method on the loaded module
     // using the received task data
     try {
-      fs.appendFileSync(filePath, `\n\n${Date.now()} - receivedFromMain, taskId: ${receivedFromMain.taskId}, workerId: ${receivedFromMain.workerId}, ${receivedFromMain.methodName}`);
+      fs.appendFileSync(filePath, `\n\n${Date.now()} - receivedFromMain, taskId: ${receivedFromMain.taskId}, pid: ${receivedFromMain.pid}, ${receivedFromMain.methodName}`);
 
       const rtn = runner(receivedFromMain.methodName, receivedFromMain.args);
 
       rtn.then((value: any) => {
-        fs.appendFileSync(filePath, `\n\n${Date.now()} - rtn.then, taskId: ${receivedFromMain.taskId}, workerId: ${receivedFromMain.workerId}, ${receivedFromMain.methodName}`);
+        fs.appendFileSync(filePath, `\n\n${Date.now()} - rtn.then, taskId: ${receivedFromMain.taskId}, pid: ${receivedFromMain.pid}, ${receivedFromMain.methodName}`);
         sendToMain.value = value;
         sendToMain.methodName = receivedFromMain.methodName;
         process.send(sendToMain);

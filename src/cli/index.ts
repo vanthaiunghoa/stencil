@@ -3,7 +3,7 @@ import { getConfigFilePath } from './cli-utils';
 import { taskHelp } from './task-help';
 import { parseFlags } from './parse-flags';
 import { runTask } from './run-task';
-import { WORKER_EXITED_MSG } from '../sys/node/worker-farm/main';
+import { PROCESS_EXITED_MSG } from '../sys/node/worker-farm/main';
 
 
 export async function run(process: NodeJS.Process, sys: d.StencilSystem, logger: d.Logger) {
@@ -59,7 +59,7 @@ export async function run(process: NodeJS.Process, sys: d.StencilSystem, logger:
     });
 
   } catch (e) {
-    if (e !== WORKER_EXITED_MSG) {
+    if (e !== PROCESS_EXITED_MSG) {
       config.logger.error(`uncaught cli error: ${e}`);
       process.exit(1);
     }
