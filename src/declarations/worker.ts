@@ -5,22 +5,15 @@ export interface WorkerOptions {
 }
 
 export interface WorkerTask {
-  assignedWorkerPid: number;
-  workerKey: string;
-  taskId: number;
-  methodName: string;
+  // assignedWorkerPid: number;
+  // workerKey: string;
+  // taskId: number;
+  method: string;
   args: any[];
   isLongRunningTask: boolean;
   resolve: (val: any) => any;
   reject: (msg: string) => any;
-}
-
-export interface WorkerProcess {
-  childProcess: ChildProcess;
-  currentActiveTasks: number;
-  exitCode: number;
-  isExisting: boolean;
-  totalTasksAssigned: number;
+  retries: number;
 }
 
 export interface ChildProcess {
@@ -49,11 +42,13 @@ export interface ChildProcess {
 }
 
 export interface WorkerMessageData {
-  pid?: number;
-  taskId?: number;
+  workerId?: number;
+  idx?: number;
+  type?: 'response' | 'request';
   modulePath?: string;
-  methodName?: string;
+  method?: string;
   args?: any[];
+  retries?: number;
   value?: any;
   exitProcess?: boolean;
   error?: {
@@ -61,6 +56,10 @@ export interface WorkerMessageData {
     message?: string;
     stack?: string;
   };
+}
+
+export interface WorkerResult {
+  idx: number;
 }
 
 export type WorkerRunner = (methodName: string, args: any[]) => Promise<any>;

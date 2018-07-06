@@ -3,7 +3,7 @@ import { createContext, runInContext } from './node-context';
 import { createDom } from './node-dom';
 import { NodeFs } from './node-fs';
 import { normalizePath } from '../../compiler/util';
-import { WorkerFarm } from './worker-farm/main';
+import { WorkerManager } from './worker/index';
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -16,7 +16,7 @@ export class NodeSystem implements d.StencilSystem {
   private packageJsonData: d.PackageJsonData;
   private distDir: string;
   private sysUtil: any;
-  private sysWorker: WorkerFarm;
+  private sysWorker: WorkerManager;
   private typescriptPackageJson: d.PackageJsonData;
   private resolveModuleCache: { [cacheKey: string]: string } = {};
   private destroys: Function[] = [];
@@ -59,13 +59,13 @@ export class NodeSystem implements d.StencilSystem {
       maxConcurrentWorkers = availableCpus;
     }
 
-    this.sysWorker = new WorkerFarm(workerModulePath, {
+    this.sysWorker = new WorkerManager(workerModulePath, {
       maxConcurrentWorkers: maxConcurrentWorkers,
       maxConcurrentTasksPerWorker: maxConcurrentTasksPerWorker
     });
 
     this.addDestroy(() => {
-      if (this.sysWorker && this.sysWorker.destroy) {
+      if (this.sysWorker) {
         this.sysWorker.destroy();
       }
     });
