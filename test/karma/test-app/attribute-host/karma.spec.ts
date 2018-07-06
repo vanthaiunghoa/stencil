@@ -21,6 +21,9 @@ describe('attribute-host', function() {
     expect(elm.getAttribute('color')).toBe(null);
     expect(elm.getAttribute('no-attr')).toBe(null);
 
+    expect(elm.style.getPropertyValue('border-color')).toEqual('black');
+    expect(elm.style.getPropertyValue('--css-var')).toEqual('12');
+
     button.click();
     await flush(app);
 

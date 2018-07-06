@@ -31,19 +31,15 @@ export function setAccessor(plt: d.PlatformApi, elm: any, memberName: string, ol
     }
 
   } else if (memberName === 'style') {
-    // Style
-    oldValue = oldValue || EMPTY_OBJ;
-    newValue = newValue || EMPTY_OBJ;
-
-    for (i in oldValue) {
-      if (!newValue[i]) {
-        (elm as any).style[i] = '';
+    for (const prop in oldValue) {
+      if (!newValue || newValue[prop] == null) {
+        elm.style.removeProperty(prop);
       }
     }
 
-    for (i in newValue) {
-      if (newValue[i] !== oldValue[i]) {
-        (elm as any).style[i] = newValue[i];
+    for (const prop in newValue) {
+      if (!oldValue || newValue[prop] !== oldValue[prop]) {
+        elm.style.setProperty(prop, newValue[prop]);
       }
     }
 
