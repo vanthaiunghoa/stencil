@@ -1,33 +1,27 @@
 import * as d from '../../declarations';
 import { Build } from '../../util/build-conditionals';
 import { elementHasProperty } from '../../core/proxy-members';
-import { EMPTY_ARR, EMPTY_OBJ, PROP_TYPE } from '../../util/constants';
+import { PROP_TYPE } from '../../util/constants';
 import { toLowerCase } from '../../util/helpers';
 import { updateAttribute } from './update-attribute';
 
 
-export function setAccessor(plt: d.PlatformApi, elm: any, memberName: string, oldValue: any, newValue: any, isSvg?: boolean, isHostElement?: boolean, i?: any, ilen?: number, cmpMeta?: d.ComponentMeta) {
+export function setAccessor(plt: d.PlatformApi, elm: HTMLElement, memberName: string, oldValue: any, newValue: any, isSvg: boolean, isHostElement: boolean) {
   if (memberName === 'class' && !isSvg) {
     // Class
     if (oldValue !== newValue) {
-      const oldList: string[] = (oldValue == null || oldValue === '') ? EMPTY_ARR : oldValue.trim().split(/\s+/);
-      const newList: string[] = (newValue == null || newValue === '') ? EMPTY_ARR : newValue.trim().split(/\s+/);
+      const oldList = parseClassList(oldValue);
+      const newList = parseClassList(newValue);
+      const toRemove = oldList.filter(item => !newList.includes(item));
 
-      let classList: string[] = (elm.className == null || elm.className === '') ? EMPTY_ARR : elm.className.trim().split(/\s+/);
+      elm.className = [
+        // delete from classList
+        ...parseClassList(elm.className).filter(item => !toRemove.includes(item)),
 
-      for (i = 0, ilen = oldList.length; i < ilen; i++) {
-        if (newList.indexOf(oldList[i]) === -1) {
-          classList = classList.filter((c: string) => c !== oldList[i]);
-        }
-      }
+        // add classes from the new list but not in old list
+        ...newList.filter(item => !oldList.includes(item))
+      ].join(' ');
 
-      for (i = 0, ilen = newList.length; i < ilen; i++) {
-        if (oldList.indexOf(newList[i]) === -1) {
-          classList = [...classList, newList[i]];
-        }
-      }
-
-      elm.className = classList.join(' ');
     }
 
   } else if (memberName === 'style') {
@@ -83,7 +77,7 @@ export function setAccessor(plt: d.PlatformApi, elm: any, memberName: string, ol
     // - list and type are attributes that get applied as values on the element
     // - all svgs get values as attributes not props
     // - check if elm contains name or if the value is array, object, or function
-    cmpMeta = plt.getComponentMeta(elm);
+    const cmpMeta = plt.getComponentMeta(elm);
     if (cmpMeta && cmpMeta.membersMeta && cmpMeta.membersMeta[memberName]) {
       // we know for a fact that this element is a known component
       // and this component has this member name as a property,
@@ -108,7 +102,7 @@ export function setAccessor(plt: d.PlatformApi, elm: any, memberName: string, ol
       // also we can ignore the "ref" member name at this point
       setProperty(elm, memberName, newValue == null ? '' : newValue);
       if (newValue == null || newValue === false) {
-        elm.removeAttribute(memberName);
+        plt.domApi.$removeAttribute(elm, memberName);
       }
     }
 
@@ -122,6 +116,10 @@ export function setAccessor(plt: d.PlatformApi, elm: any, memberName: string, ol
   }
 }
 
+
+function parseClassList(value: string | undefined | null): string[] {
+  return (value == null || value === '') ? [] : value.trim().split(/\s+/);
+}
 
 /**
  * Attempt to set a DOM property to the given value.
